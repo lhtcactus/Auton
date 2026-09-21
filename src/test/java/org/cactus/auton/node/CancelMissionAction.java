@@ -18,14 +18,14 @@ public class CancelMissionAction extends Action<VehicleState> {
 
     @Override
     protected Status doExecute(TickContext<VehicleState> context) {
-        CancelMissionParam param = context.blackboard().get("cancelMissionParam");
+        CancelMissionParam param = new CancelMissionParam();
+        param.setDeviceId(context.actor().id());
+        param.setMissionId(context.actor().state().getMissionId());
         VehicleService vehicleService = ServiceRegistry.get(VehicleService.class);
         vehicleService.cancelMission(param);
 
         Actor<VehicleState> actor = context.actor();
-        actor.state().setTask(State.START.getValue());
-        actor.state().setNavigation(State.START.getValue());
-        actor.state().setMissionId(null);
+        actor.state().setCancelTask(State.RUNNING.getValue());
         actorRepository.save(actor);
         return Status.BuiltIn.RUNNING;
     }

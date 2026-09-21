@@ -4,8 +4,27 @@ public class VehicleState {
     private String missionId;
     private String login;
     private String emergency;
+    //急停恢复
+    private String recover;
     private String task;
     private String navigation;
+    private String cancelTask;
+
+    public String getRecover() {
+        return recover;
+    }
+
+    public void setRecover(String recover) {
+        this.recover = recover;
+    }
+
+    public String getCancelTask() {
+        return cancelTask;
+    }
+
+    public void setCancelTask(String cancelTask) {
+        this.cancelTask = cancelTask;
+    }
 
     public String getMissionId() {
         return missionId;
@@ -53,8 +72,10 @@ public class VehicleState {
                 "missionId='" + missionId + '\'' +
                 ", login='" + login + '\'' +
                 ", emergency='" + emergency + '\'' +
+                ", recover='" + recover + '\'' +
                 ", task='" + task + '\'' +
                 ", navigation='" + navigation + '\'' +
+                ", cancelTask='" + cancelTask + '\'' +
                 '}';
     }
 }

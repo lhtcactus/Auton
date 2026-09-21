@@ -15,18 +15,17 @@ public class CreateTaskAndNaviCmd extends AbstractCommand<CreateTaskAndNaviCmd.C
 
     @Override
     public void fillParams(Blackboard blackboard) {
-        CancelMissionParam cancelMissionParam = new CancelMissionParam();
-        blackboard.put("cancelMissionParam", cancelMissionParam);
-
         CreateMission.Navi navi = param.getNavi();
         CreateNaviParam createNaviParam = new CreateNaviParam();
         createNaviParam.setMissionId(navi.getMissionId());
         createNaviParam.setDestCode(navi.getDestCode());
+        createNaviParam.setDeviceId(param.getDeviceId());
         blackboard.put("createNaviParam", createNaviParam);
 
         CreateMission.Task task = param.getTask();
         CreateTaskParam createTaskParam = new CreateTaskParam();
         createTaskParam.setMissionId(task.getMissionId());
+        createTaskParam.setDeviceId(param.getDeviceId());
         blackboard.put("createTaskParam", createTaskParam);
     }
 
@@ -42,8 +41,17 @@ public class CreateTaskAndNaviCmd extends AbstractCommand<CreateTaskAndNaviCmd.C
     }
 
     public static class CreateMission {
+        private String deviceId;
         private Task task;
         private Navi navi;
+
+        public String getDeviceId() {
+            return deviceId;
+        }
+
+        public void setDeviceId(String deviceId) {
+            this.deviceId = deviceId;
+        }
 
         public Task getTask() {
             return task;

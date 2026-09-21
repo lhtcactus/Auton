@@ -28,7 +28,7 @@ public class EmergencyAction extends AbstractExecByNoMissionAction {
         ServiceRegistry.<VehicleService>get(VehicleService.class).emergency(context.actor().id());
 
         Actor<VehicleState> actor = context.actor();
-        actor.state().setEmergency(State.APPLY.getValue());
+        actor.state().setEmergency(State.RUNNING.getValue());
         return actor;
     }
 }

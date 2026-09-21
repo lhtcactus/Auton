@@ -1,7 +1,16 @@
 package org.cactus.auton.service;
 
 public class CancelMissionParam {
+    private String deviceId;
     private String missionId;
+
+    public String getDeviceId() {
+        return deviceId;
+    }
+
+    public void setDeviceId(String deviceId) {
+        this.deviceId = deviceId;
+    }
 
     public String getMissionId() {
         return missionId;
@@ -14,7 +23,8 @@ public class CancelMissionParam {
     @Override
     public String toString() {
         return "CancelMissionParam{" +
-                "missionId='" + missionId + '\'' +
+                "deviceId='" + deviceId + '\'' +
+                ", missionId='" + missionId + '\'' +
                 '}';
     }
 }

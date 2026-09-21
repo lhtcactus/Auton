@@ -3,10 +3,11 @@ package org.cactus.auton.engine;
 import org.cactus.auton.ServiceRegistry;
 import org.cactus.auton.blackboard.DefaultBlackboard;
 import org.cactus.auton.command.Command;
-import org.cactus.auton.command.CommandQueue;
+import org.cactus.auton.command.CommandManger;
 import org.cactus.auton.context.DefaultContext;
 import org.cactus.auton.context.TickContext;
 import org.cactus.auton.context.TreeTracer;
+import org.cactus.auton.exception.BehaviorException;
 import org.cactus.auton.exception.NotFoundException;
 import org.cactus.auton.node.Node;
 import org.cactus.auton.node.Status;
@@ -28,50 +29,42 @@ import java.util.function.Function;
  */
 public abstract class CommandBehaviorTreeEngine<S> {
 
-    private final CommandQueue<S> commandQueue;
-    private final ActorRepository<S> actorRepository;
-    private final Map<String, Node<S>> nodes;
-    private final AsyncExecutor asyncExecutor;
-    private TreeTracer<S> treeTracer;
+    protected final CommandManger<S> commandManger;
+    protected final ActorRepository<S> actorRepository;
+    protected final Map<String, Node<S>> nodes;
+    protected final AsyncExecutor asyncExecutor;
+    protected TreeTracer<S> treeTracer;
 
     /**
      * @param nodeTypeMap 命令 type → 行为树根节点映射
      * @param actorRepository Actor 仓库
-     * @param commandQueue 命令队列
+     * @param commandManger 命令管理器
      */
     public CommandBehaviorTreeEngine(Map<String, Node<S>> nodeTypeMap,
                                         ActorRepository<S> actorRepository,
-                                        CommandQueue<S> commandQueue) {
+                                     CommandManger<S> commandManger) {
         this.nodes = new ConcurrentHashMap<>(nodeTypeMap);
         this.actorRepository = actorRepository;
-        this.commandQueue = commandQueue;
+        this.commandManger = commandManger;
         this.asyncExecutor = getAsyncExecutor();
         this.treeTracer = getTreeTracer();
         ServiceRegistry.register(CommandBehaviorTreeEngine.class, this);
-        ServiceRegistry.register(CommandQueue.class, commandQueue);
+        ServiceRegistry.register(CommandManger.class, commandManger);
         ServiceRegistry.register(ActorRepository.class, actorRepository);
     }
 
     // ========== 用户调用入口 ==========
 
-    /** 添加命令到队尾，自动触发 tick。 */
-    public void addCommand(Command<S> command) {
+    /**
+     * 提交命令,自动触发 tick
+     * @param  operation 操作符，有实现者自定义。例如对命令进行追加、覆盖、安全命令等
+     * @param  command 命令
+     */
+    public void submit(String operation,Command<S> command)throws BehaviorException{
         Lock lock = getLock(command.actorId());
-        lock.lock();
         try {
-            commandQueue.enqueue(command);
-            tick(command.actorId());
-        } finally {
-            lock.unlock();
-        }
-    }
-
-    /** 插队命令到队首（高优先级），自动触发 tick。 */
-    public void addCommandFirst(Command<S> command) {
-        Lock lock = getLock(command.actorId());
-        lock.lock();
-        try {
-            commandQueue.insertFirst(command);
+            lock.lock();
+            commandManger.submit(operation,command);
             tick(command.actorId());
         } finally {
             lock.unlock();
@@ -83,10 +76,10 @@ public abstract class CommandBehaviorTreeEngine<S> {
      * <p>引擎负责 find → 回调更新 → save 全流程，
      * 外部无需接触 ActorRepository，后续加锁也在此统一控制。</p>
      */
-    public void updateActor(String actorId, Function<Actor<S>, Actor<S>> updater) {
+    public void updateActor(String actorId, Function<Actor<S>, Actor<S>> updater) throws BehaviorException{
         Lock lock = getLock(actorId);
-        lock.lock();
         try {
+            lock.lock();
             Actor<S> actor = actorRepository.find(actorId);
             if (actor == null){
                 actor = createDefaultActor(actorId);
@@ -136,7 +129,7 @@ public abstract class CommandBehaviorTreeEngine<S> {
      * 执行完毕后，若 afterTick 返回 true 则异步续 tick，释放当前线程的锁。
      */
     protected void tick(String actorId) {
-        Command<S> cmd = commandQueue.peek(actorId);
+        Command<S> cmd =  commandManger.next(actorId);
         if (cmd == null) {
             return;
         }
@@ -149,12 +142,12 @@ public abstract class CommandBehaviorTreeEngine<S> {
         if (!afterTick(status, context)) {
             return;
         }
-        commandQueue.removeByCmdId(actorId,cmd.id());
+        commandManger.removeById(actorId,cmd.id());
         // 继续下一次 tick，避免阻塞当前 tick
         asyncExecutor.submit(() -> {
             Lock lock = getLock(actorId);
-            lock.lock();
             try{
+                lock.lock();
                 tick(actorId);
             }finally {
                 lock.unlock();
@@ -169,7 +162,7 @@ public abstract class CommandBehaviorTreeEngine<S> {
     protected TreeTracer<S> getTreeTracer() { return new TreeTracer<S>() {}; }
 
     /** 根据 actorId 获取对应的锁，子类实现分布式锁接入 */
-    protected abstract Lock getLock(String actorId);
+    public abstract Lock getLock(String actorId);
 
     /** 异步执行器，默认使用固定线程池，子类可按需替换 */
     protected AsyncExecutor getAsyncExecutor() {
@@ -185,7 +178,7 @@ public abstract class CommandBehaviorTreeEngine<S> {
 
     /** 分布式锁抽象 */
     public interface Lock {
-        void lock();
+        void lock() throws BehaviorException;
         void unlock();
     }
 
