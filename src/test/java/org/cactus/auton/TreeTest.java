@@ -2,10 +2,9 @@ package org.cactus.auton;
 
 import jakarta.annotation.PostConstruct;
 import org.cactus.auton.builder.TreeBuilder;
-import org.cactus.auton.cmd.CreateTaskAndNaviCmd;
-import org.cactus.auton.cmd.EmergencyCmd;
 import org.cactus.auton.command.Command;
 import org.cactus.auton.command.CommandManger;
+import org.cactus.auton.command.GeneralCommand;
 import org.cactus.auton.config.MapActorRepository;
 import org.cactus.auton.config.MapCommandManger;
 import org.cactus.auton.config.VehicleBehaviorEngine;
@@ -17,24 +16,17 @@ import org.cactus.auton.state.State;
 import org.cactus.auton.state.VehicleState;
 import org.cactus.auton.subject.Actor;
 import org.cactus.auton.subject.ActorRepository;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.UUID;
+import java.util.*;
+import java.util.function.Consumer;
 
 @RestController
 @RequestMapping("/api/test")
 public class TreeTest {
-    /** 默认测试车辆 */
-    private static final String DEFAULT_ACTOR_ID = "A501";
+    enum Commands{
+        CREATE_TASK_AND_NAVI,EMERGENCY_CMD,NO_EMERGENCY_CMD
+    }
 
     /** 反馈码：接收 */
     private static final int CODE_ACCEPT = 202;
@@ -45,7 +37,7 @@ public class TreeTest {
 
     private CommandBehaviorTreeEngine<VehicleState> engine;
 
-    private CommandManger<VehicleState> commandManger;
+    private CommandManger commandManger;
     private ActorRepository<VehicleState> actorRepository;
 
     @PostConstruct
@@ -82,11 +74,12 @@ public class TreeTest {
                 .nodeRegistry(registry -> registry.scanPackages("org.cactus.auton.node"))
                 .build();
 
-
+        // 注册命令
         Map<String,Node<VehicleState>> treeMap = new HashMap<>();
-        treeMap.put("CREATE_TASK_AND_Navi", createTaskAndNaviCmd);
+        treeMap.put(Commands.CREATE_TASK_AND_NAVI.name(), createTaskAndNaviCmd);
 
-        treeMap.put("EMERGENCY_CMD", new EmergencyAction("EMERGENCY_CMD", "急停命令"));
+        treeMap.put(Commands.EMERGENCY_CMD.name(), new EmergencyAction(Commands.EMERGENCY_CMD.name(), "急停命令"));
+        treeMap.put(Commands.NO_EMERGENCY_CMD.name(), new EmergencyAction(Commands.NO_EMERGENCY_CMD.name(), "急停恢复命令"));
         commandManger =  new MapCommandManger();
         actorRepository = new MapActorRepository();
         // 创建行为树引擎
@@ -100,8 +93,8 @@ public class TreeTest {
     // ==================== 模拟接收外部消息（供接口测试使用） ====================
 
     /** 模拟车辆登录 */
-    @PostMapping("/vehicle/login")
-    public Map<String, Object> login(@RequestParam(value = "actorId", defaultValue = DEFAULT_ACTOR_ID) String actorId) {
+    @PostMapping("/login")
+    public Map<String, Object> login(@RequestParam(value = "actorId") String actorId) {
         engine.updateActor(actorId, actor -> {
             actor.state().setLogin(State.FINISH.getValue());
             return actor;
@@ -111,189 +104,61 @@ public class TreeTest {
 
     /** 模拟调度下发「创建任务 + 导航」命令（追加到命令队列） */
     @PostMapping("/mission/create")
-    public Map<String, Object> createMission(@RequestParam(value = "actorId", defaultValue = DEFAULT_ACTOR_ID) String actorId,
-                                             @RequestParam(value = "cmdId", required = false) String cmdId,
-                                             @RequestParam(value = "missionId", required = false) String missionId,
-                                             @RequestParam(value = "destCode", defaultValue = "D001") String destCode) {
-        CreateTaskAndNaviCmd cmd = buildCreateTaskCmd(actorId, cmdId, missionId, destCode);
-        engine.submit("APPEND", cmd);
-        return ok("已下发创建任务命令，cmdId=" + cmd.id() + "，missionId=" + cmd.missionId(), buildState(actorId));
+    public Map<String, Object> createMission(@RequestParam(value = "actorId") String actorId,
+                                             @RequestParam(value = "missionId") String missionId,
+                                             @RequestParam(value = "destCode", defaultValue = "D001") String destCode,
+                                             @RequestParam(value = "operation") String operation
+                                             ) {
+
+        GeneralCommand command = buildCmd(
+                Commands.CREATE_TASK_AND_NAVI.name(),
+                actorId,
+                missionId,
+                (params)->{
+                    params.put("destCode",destCode);
+                });
+        engine.submit(operation, command);
+        return ok("已下发创建任务命令，cmdId=" + command.id() + "，missionId=" + command.missionId(), buildState(actorId));
     }
 
-    /** 模拟调度下发任务更新（覆盖当前命令） */
-    @PostMapping("/mission/replace")
-    public Map<String, Object> replaceMission(@RequestParam(value = "actorId", defaultValue = DEFAULT_ACTOR_ID) String actorId,
-                                              @RequestParam(value = "cmdId", required = false) String cmdId,
-                                              @RequestParam(value = "missionId", required = false) String missionId,
-                                              @RequestParam(value = "destCode", defaultValue = "D001") String destCode) {
-        CreateTaskAndNaviCmd cmd = buildCreateTaskCmd(actorId, cmdId, missionId, destCode);
-        engine.submit("REPLACE", cmd);
-        return ok("已下发任务更新命令，cmdId=" + cmd.id() + "，missionId=" + cmd.missionId(), buildState(actorId));
-    }
 
-    /** 模拟下发急停命令（安全命令，优先执行） */
+    /** 模拟调度下发「急停/急停恢复」 */
     @PostMapping("/emergency")
-    public Map<String, Object> emergency(@RequestParam(value = "actorId", defaultValue = DEFAULT_ACTOR_ID) String actorId,
-                                         @RequestParam(value = "cmdId", required = false) String cmdId) {
-        EmergencyCmd cmd = new EmergencyCmd();
-        cmd.setId(cmdId == null || cmdId.isBlank() ? UUID.randomUUID().toString() : cmdId);
-        cmd.setActorId(actorId);
-        engine.submit("SAFETY", cmd);
-        return ok("已下发急停命令，cmdId=" + cmd.id(), buildState(actorId));
-    }
+    public Map<String, Object> emergency(@RequestParam(value = "actorId") String actorId,
+                                             @RequestParam(value = "stop", required = false) Boolean stop) {
 
-    // ---------- 车辆反馈：任务 ----------
-
-    /** 模拟接收到「任务接收」(202) */
-    @PostMapping("/feedback/task/accept")
-    public Map<String, Object> taskAccept(@RequestParam(value = "actorId", defaultValue = DEFAULT_ACTOR_ID) String actorId,
-                                          @RequestParam(value = "missionId", required = false) String missionId) {
-        return applyFeedback(actorId, "createMission", missionId, CODE_ACCEPT);
-    }
-
-    /** 模拟接收到「任务完成」(200) */
-    @PostMapping("/feedback/task/finish")
-    public Map<String, Object> taskFinish(@RequestParam(value = "actorId", defaultValue = DEFAULT_ACTOR_ID) String actorId,
-                                          @RequestParam(value = "missionId", required = false) String missionId) {
-        return applyFeedback(actorId, "createMission", missionId, CODE_FINISH);
-    }
-
-    // ---------- 车辆反馈：导航 ----------
-
-    /** 模拟接收到「导航接受」(202) */
-    @PostMapping("/feedback/navi/accept")
-    public Map<String, Object> naviAccept(@RequestParam(value = "actorId", defaultValue = DEFAULT_ACTOR_ID) String actorId,
-                                          @RequestParam(value = "missionId", required = false) String missionId) {
-        return applyFeedback(actorId, "createNavi", missionId, CODE_ACCEPT);
-    }
-
-    /** 模拟接收到「导航到达」(200) */
-    @PostMapping("/feedback/navi/arrive")
-    public Map<String, Object> naviArrive(@RequestParam(value = "actorId", defaultValue = DEFAULT_ACTOR_ID) String actorId,
-                                          @RequestParam(value = "missionId", required = false) String missionId) {
-        return applyFeedback(actorId, "createNavi", missionId, CODE_FINISH);
-    }
-
-    /** 模拟接收到「导航异常」(500) */
-    @PostMapping("/feedback/navi/error")
-    public Map<String, Object> naviError(@RequestParam(value = "actorId", defaultValue = DEFAULT_ACTOR_ID) String actorId,
-                                         @RequestParam(value = "missionId", required = false) String missionId) {
-        return applyFeedback(actorId, "createNavi", missionId, CODE_ERROR);
-    }
-
-    // ---------- 车辆反馈：取消任务 ----------
-
-    /** 模拟接收到「取消任务接收」(202) */
-    @PostMapping("/feedback/cancel/accept")
-    public Map<String, Object> cancelAccept(@RequestParam(value = "actorId", defaultValue = DEFAULT_ACTOR_ID) String actorId,
-                                            @RequestParam(value = "missionId", required = false) String missionId) {
-        return applyFeedback(actorId, "cancelMission", missionId, CODE_ACCEPT);
-    }
-
-    /** 模拟接收到「取消任务完成」(200) */
-    @PostMapping("/feedback/cancel/finish")
-    public Map<String, Object> cancelFinish(@RequestParam(value = "actorId", defaultValue = DEFAULT_ACTOR_ID) String actorId,
-                                            @RequestParam(value = "missionId", required = false) String missionId) {
-        return applyFeedback(actorId, "cancelMission", missionId, CODE_FINISH);
-    }
-
-    // ---------- 车辆反馈：急停 ----------
-
-    /** 模拟接收到「急停接收」(202) */
-    @PostMapping("/feedback/emergency/accept")
-    public Map<String, Object> emergencyAccept(@RequestParam(value = "actorId", defaultValue = DEFAULT_ACTOR_ID) String actorId) {
-        return applyFeedback(actorId, "emergency", null, CODE_ACCEPT);
-    }
-
-    /** 模拟接收到「急停完成」(200) */
-    @PostMapping("/feedback/emergency/finish")
-    public Map<String, Object> emergencyFinish(@RequestParam(value = "actorId", defaultValue = DEFAULT_ACTOR_ID) String actorId) {
-        return applyFeedback(actorId, "emergency", null, CODE_FINISH);
-    }
-
-    // ---------- 车辆反馈：急停恢复 ----------
-
-    /** 模拟接收到「急停恢复接收」(202) */
-    @PostMapping("/feedback/recover/accept")
-    public Map<String, Object> recoverAccept(@RequestParam(value = "actorId", defaultValue = DEFAULT_ACTOR_ID) String actorId) {
-        return applyFeedback(actorId, "noEmergency", null, CODE_ACCEPT);
-    }
-
-    /** 模拟接收到「急停恢复完成」(200) */
-    @PostMapping("/feedback/recover/finish")
-    public Map<String, Object> recoverFinish(@RequestParam(value = "actorId", defaultValue = DEFAULT_ACTOR_ID) String actorId) {
-        return applyFeedback(actorId, "noEmergency", null, CODE_FINISH);
-    }
-
-    /** 通用反馈接口：type=createMission|createNavi|cancelMission|emergency|noEmergency，code=202|200|500 */
-    @PostMapping("/feedback")
-    public Map<String, Object> feedback(@RequestParam(value = "actorId", defaultValue = DEFAULT_ACTOR_ID) String actorId,
-                                        @RequestParam(value = "type") String type,
-                                        @RequestParam(value = "missionId", required = false) String missionId,
-                                        @RequestParam(value = "code", defaultValue = "202") int code) {
-        return applyFeedback(actorId, type, missionId, code);
-    }
-
-    // ---------- 查询与重置 ----------
-
-    /** 查询车辆当前状态与命令队列 */
-    @GetMapping("/state")
-    public Map<String, Object> state(@RequestParam(value = "actorId", defaultValue = DEFAULT_ACTOR_ID) String actorId) {
-        return ok("ok", buildState(actorId));
-    }
-
-    /** 重置车辆：清空命令队列与状态 */
-    @PostMapping("/reset")
-    public Map<String, Object> reset(@RequestParam(value = "actorId", defaultValue = DEFAULT_ACTOR_ID) String actorId) {
-        commandManger.clearActorCommands(actorId);
-        actorRepository.delete(actorId);
-        return ok("已重置车辆: " + actorId, null);
-    }
-
-    // ==================== 内部工具方法 ====================
-
-    /** 构造「创建任务 + 导航」命令 */
-    private CreateTaskAndNaviCmd buildCreateTaskCmd(String actorId, String cmdId, String missionId, String destCode) {
-        String mid = blank(missionId) ? UUID.randomUUID().toString() : missionId;
-        CreateTaskAndNaviCmd cmd = new CreateTaskAndNaviCmd();
-        cmd.setId(blank(cmdId) ? UUID.randomUUID().toString() : cmdId);
-        cmd.setActorId(actorId);
-        cmd.setMissionId(mid);
-
-        CreateTaskAndNaviCmd.CreateMission param = new CreateTaskAndNaviCmd.CreateMission();
-        param.setDeviceId(actorId);
-        param.setNavi(new CreateTaskAndNaviCmd.CreateMission.Navi());
-        param.getNavi().setMissionId(mid);
-        param.getNavi().setDestCode(destCode);
-        param.setTask(new CreateTaskAndNaviCmd.CreateMission.Task());
-        param.getTask().setMissionId(mid);
-        cmd.setParam(param);
-        return cmd;
-    }
-
-    /**
-     * 模拟接收到车辆反馈，按 type + code 更新车辆状态并触发 tick。
-     */
-    private Map<String, Object> applyFeedback(String actorId, String type, String missionId, int code) {
-        if (!isSupportType(type)) {
-            return fail("不支持的反馈类型: " + type
-                    + "，可选 createMission|createNavi|cancelMission|emergency|noEmergency");
+        String cmdName = Commands.EMERGENCY_CMD.name();
+        if(!stop){
+            cmdName = Commands.NO_EMERGENCY_CMD.name();
         }
+        GeneralCommand command = buildCmd(
+                cmdName,
+                actorId,
+                null,
+                (params)->{
+                });
+        engine.submit("SAFETY", command);
+        return ok("已下发创建任务命令，cmdId=" + command.id() + "，missionId=" + command.missionId(), buildState(actorId));
+    }
+
+
+    /** 模拟车辆反馈 */
+    @PostMapping("/feedback")
+    public Map<String, Object> feedback(@RequestParam(value = "actorId") String actorId,
+                                          @RequestParam(value = "missionId") String missionId,
+                                          @RequestParam(value = "callbackType") String type,
+                                          @RequestParam(value = "code") int code
+
+                                          ) {
         if (code != CODE_ACCEPT && code != CODE_FINISH && code != CODE_ERROR) {
             return fail("不支持的反馈码: " + code + "，可选 202(接收)|200(完成)|500(异常)");
-        }
-        // missionId 未传时取车辆当前任务
-        String mid = missionId;
-        if (blank(mid)) {
-            Actor<VehicleState> actor = actorRepository.find(actorId);
-            mid = actor == null ? null : actor.state().getMissionId();
         }
         // 与任务相关的反馈需校验 missionId，不一致则忽略
         if (needMissionId(type)) {
             Actor<VehicleState> actor = actorRepository.find(actorId);
             String currentMissionId = actor == null ? null : actor.state().getMissionId();
-            if (!Objects.equals(currentMissionId, mid)) {
-                return fail("missionId 不匹配，已忽略该反馈。当前任务=" + currentMissionId + "，反馈任务=" + mid);
+            if (!Objects.equals(currentMissionId, missionId)) {
+                return fail("missionId 不匹配，已忽略该反馈。当前任务=" + currentMissionId + "，反馈任务=" + missionId);
             }
         }
 
@@ -321,13 +186,34 @@ public class TreeTest {
             }
             return actor;
         });
-        return ok("已模拟接收反馈 type=" + type + "，code=" + code + "，missionId=" + mid, buildState(actorId));
+        return ok("已模拟接收反馈 type=" + type + "，code=" + code + "，missionId=" + missionId, buildState(actorId));
     }
+
+
+    // ---------- 查询与重置 ----------
+
+    /** 查询车辆当前状态与命令队列 */
+    @GetMapping("/state")
+    public Map<String, Object> state(@RequestParam(value = "actorId") String actorId) {
+        return ok("ok", buildState(actorId));
+    }
+
+    /** 重置车辆：清空命令队列与状态 */
+    @PostMapping("/reset")
+    public Map<String, Object> reset(@RequestParam(value = "actorId") String actorId) {
+        commandManger.clearActorCommands(actorId);
+        actorRepository.delete(actorId);
+        return ok("已重置车辆: " + actorId, null);
+    }
+
+    // ==================== 内部工具方法 ====================
+
+
 
     /** 组装状态快照，避免直接序列化 Actor/Command（二者不是标准 JavaBean） */
     private Map<String, Object> buildState(String actorId) {
         Actor<VehicleState> actor = actorRepository.find(actorId);
-        List<Command<VehicleState>> commands = commandManger.findCommands(actorId);
+        List<Command> commands = commandManger.findCommands(actorId);
 
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("actorId", actorId);
@@ -342,7 +228,7 @@ public class TreeTest {
         }
         List<Map<String, Object>> commandList = new java.util.ArrayList<>();
         if (commands != null) {
-            for (Command<VehicleState> cmd : commands) {
+            for (Command cmd : commands) {
                 Map<String, Object> cmdMap = new LinkedHashMap<>();
                 cmdMap.put("id", cmd.id());
                 cmdMap.put("type", cmd.type());
@@ -370,14 +256,7 @@ public class TreeTest {
         return "createMission".equals(type) || "createNavi".equals(type) || "cancelMission".equals(type);
     }
 
-    private boolean isSupportType(String type) {
-        return "createMission".equals(type) || "createNavi".equals(type) || "cancelMission".equals(type)
-                || "emergency".equals(type) || "noEmergency".equals(type);
-    }
 
-    private boolean blank(String value) {
-        return value == null || value.isBlank();
-    }
 
     private Map<String, Object> ok(String message, Object data) {
         Map<String, Object> result = new LinkedHashMap<>();
@@ -394,6 +273,18 @@ public class TreeTest {
         result.put("success", false);
         result.put("message", message);
         return result;
+    }
+
+    private GeneralCommand buildCmd(String type, String actorId, String missionId, Consumer<Map<String,Object>> paramsConsumer){
+        GeneralCommand command = new GeneralCommand();
+        command.setId(UUID.randomUUID().toString());
+        command.setActorId(actorId);
+        command.setType(type);
+        command.setMissionId(missionId);
+        Map<String,Object> params = new HashMap<>();
+        paramsConsumer.accept(params);
+        command.setParams(params);
+        return command;
     }
 
 }

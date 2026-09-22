@@ -50,7 +50,7 @@ public class CreateMissionAction extends Action<VehicleState> {
                 return Status.BuiltIn.FAILURE;
             }
         }else if(State.START.equalsValue(state)
-                ||State.ERROR.equalsValue(state)){
+               ){
             //创建任务并返回RUNNING
             Actor<VehicleState> actor = execService(context);
             actorRepository.save(actor);
@@ -65,7 +65,7 @@ public class CreateMissionAction extends Action<VehicleState> {
                 return Status.BuiltIn.FAILURE;
             }
         }
-        return Status.BuiltIn.FAILURE;
+        return Status.BuiltIn.ABORT;
     }
 
 

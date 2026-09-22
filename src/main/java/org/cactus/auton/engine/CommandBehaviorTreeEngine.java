@@ -29,7 +29,7 @@ import java.util.function.Function;
  */
 public abstract class CommandBehaviorTreeEngine<S> {
 
-    protected final CommandManger<S> commandManger;
+    protected final CommandManger commandManger;
     protected final ActorRepository<S> actorRepository;
     protected final Map<String, Node<S>> nodes;
     protected final AsyncExecutor asyncExecutor;
@@ -42,7 +42,7 @@ public abstract class CommandBehaviorTreeEngine<S> {
      */
     public CommandBehaviorTreeEngine(Map<String, Node<S>> nodeTypeMap,
                                         ActorRepository<S> actorRepository,
-                                     CommandManger<S> commandManger) {
+                                     CommandManger commandManger) {
         this.nodes = new ConcurrentHashMap<>(nodeTypeMap);
         this.actorRepository = actorRepository;
         this.commandManger = commandManger;
@@ -60,7 +60,7 @@ public abstract class CommandBehaviorTreeEngine<S> {
      * @param  operation 操作符，有实现者自定义。例如对命令进行追加、覆盖、安全命令等
      * @param  command 命令
      */
-    public void submit(String operation,Command<S> command)throws BehaviorException{
+    public void submit(String operation,Command command)throws BehaviorException{
         Lock lock = getLock(command.actorId());
         try {
             lock.lock();
@@ -104,7 +104,7 @@ public abstract class CommandBehaviorTreeEngine<S> {
      * 构建并返回 tick 的执行上下文
      * @param  command 命令
      */
-    protected TickContext<S> buildContext(Command<S> command) {
+    protected TickContext<S> buildContext(Command command) {
         Actor<S> actor = actorRepository.find(command.actorId());
         if (actor == null){
             actor = createDefaultActor(command.actorId());
@@ -129,7 +129,7 @@ public abstract class CommandBehaviorTreeEngine<S> {
      * 执行完毕后，若 afterTick 返回 true 则异步续 tick，释放当前线程的锁。
      */
     protected void tick(String actorId) {
-        Command<S> cmd =  commandManger.next(actorId);
+        Command cmd =  commandManger.next(actorId);
         if (cmd == null) {
             return;
         }

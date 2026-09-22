@@ -17,7 +17,7 @@ public interface TickContext<S> {
      *
      * @return 当前命令
      */
-    Command<S> command();
+    Command command();
 
     /**
      * 获取 Actor 快照。

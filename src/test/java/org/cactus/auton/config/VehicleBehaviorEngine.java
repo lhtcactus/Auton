@@ -24,7 +24,7 @@ public class VehicleBehaviorEngine extends CommandBehaviorTreeEngine<VehicleStat
 
     private final Map<String, Lock> lockMap = new ConcurrentHashMap<>();
 
-    public VehicleBehaviorEngine(Map<String, Node<VehicleState>> nodeCommandMap, ActorRepository<VehicleState> actorRepository, CommandManger<VehicleState> commandManger) {
+    public VehicleBehaviorEngine(Map<String, Node<VehicleState>> nodeCommandMap, ActorRepository<VehicleState> actorRepository, CommandManger commandManger) {
         super(nodeCommandMap, actorRepository, commandManger);
     }
 
@@ -45,12 +45,6 @@ public class VehicleBehaviorEngine extends CommandBehaviorTreeEngine<VehicleStat
 
     @Override
     protected boolean afterTick(Status status, TickContext<VehicleState> context) {
-        Actor<VehicleState> actor = context.actor();
-
-        List<Command<VehicleState>> commands = commandManger.findCommands("A501");
-        System.out.println("当前状态：");
-        System.out.println("    actor:"+actor);
-        System.out.println("    commands: " + commands);
         boolean isCloseCommand = false;
         if (Status.BuiltIn.SUCCESS.sameStateAs(status)){
             isCloseCommand = true;
@@ -61,9 +55,6 @@ public class VehicleBehaviorEngine extends CommandBehaviorTreeEngine<VehicleStat
         }else{
             System.out.println("    Command is running/abort: " + context.command());
         }
-        System.out.println("=======================================================================================================================================");
-        System.out.println(" ");
-
         return isCloseCommand;
     }
 

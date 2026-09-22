@@ -11,12 +11,12 @@ import org.cactus.auton.command.Command;
  */
 public class DefaultContext<S> implements TickContext<S> {
 
-    private final Command<S> cmd;
+    private final Command cmd;
     private final Actor<S> actor;
     private final Blackboard blackboard;
     private final TreeTracer<S> tracer;
 
-    public DefaultContext(Command<S> cmd,
+    public DefaultContext(Command cmd,
                           Actor<S> actor,
                           Blackboard blackboard,
                           TreeTracer<S> tracer) {
@@ -27,7 +27,7 @@ public class DefaultContext<S> implements TickContext<S> {
     }
 
     @Override
-    public Command<S> command() { return this.cmd; }
+    public Command command() { return this.cmd; }
 
     @Override
     public Actor<S> actor() { return this.actor; }
