@@ -48,7 +48,7 @@ public class MapCommandManger implements CommandManger<VehicleState> {
             return safeCommand;
         }
         LinkedList<Command<VehicleState>> l = map.get(actorId);
-        if(l != null){
+        if(l != null && !l.isEmpty()){
             return l.getFirst();
         }
         return null;
